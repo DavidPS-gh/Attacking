@@ -14,6 +14,10 @@ ns.DEFAULTS = {
   showResult = true,      -- resultado del golpe junto al icono (¡Fallo!, Parado…)
   resultCrit = true,      -- …incluidos críticos y golpes rozados
   resultPos = "side",     -- "side" (a la derecha) o "top" (encima)
+  auraBuffs = true,       -- fila de buffos propios
+  auraDebuffs = true,     -- fila de debuffos del objetivo
+  auraWhen = "attack",    -- "attack" (mientras atacas), "combat" o "always"
+  auraSize = 24,
   locked = true,
   point = { "CENTER", "CENTER", 0, -160 },
 }
@@ -149,6 +153,10 @@ ev:SetScript("OnEvent", function(self, event, ...)
     end
     AttackingDB.version = ns.VERSION
     ns.db = AttackingDB
+    -- por personaje: qué buffos y debuffos seguir (las listas se rellenan al entrar, en Auras.lua)
+    AttackingCharDB = AttackingCharDB or {}
+    AttackingCharDB.version = ns.VERSION
+    ns.char = AttackingCharDB
 
   elseif event == "PLAYER_LOGIN" then
     playerGUID = UnitGUID("player")

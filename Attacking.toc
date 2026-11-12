@@ -2,9 +2,11 @@
 ## Title: Attacking
 ## Notes: El tiempo hasta tu siguiente golpe, como un icono que se va rellenando. /attacking
 ## Author: SenorLobo
-## Version: 0.2.0
+## Version: 0.3.0
 ## SavedVariables: AttackingDB
+## SavedVariablesPerCharacter: AttackingCharDB
 
 Attacking.lua
 Display.lua
+Auras.lua
 Config.lua

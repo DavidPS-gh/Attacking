@@ -172,6 +172,7 @@ function ns.Refresh()
     anchor:SetBackdropBorderColor(0.3, 0.6, 1, 0.9)
     label:Show()
   end
+  if ns.UpdateAuras then ns.UpdateAuras() end
 end
 
 local function setResult(f, kind)
@@ -261,6 +262,7 @@ end
 
 function ns.BuildDisplay()
   anchor = CreateFrame("Frame", "AttackingAnchor", UIParent, "BackdropTemplate")
+  ns.anchor = anchor -- las filas de buffos (Auras.lua) cuelgan de aquí
   anchor:SetBackdrop({
     bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1,
   })
