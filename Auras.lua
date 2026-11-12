@@ -57,7 +57,7 @@ function ns.ClassDefaults(kind)
   for _, e in ipairs(d[kind] or {}) do
     local id, mine = e, nil
     if type(e) == "table" then id, mine = e[1], e[2] end
-    local name = GetSpellInfo(id)
+    local name = ns.SpellName(id)
     if name and not seen[name:lower()] then
       seen[name:lower()] = true
       out[#out + 1] = { name = name, mine = mine or nil }
@@ -72,7 +72,7 @@ function ns.AddAura(kind, text)
   if text == "" then return nil, "Escribe el nombre (o el número) del hechizo." end
   local name = text
   if tonumber(text) then
-    name = GetSpellInfo(tonumber(text))
+    name = ns.SpellName(tonumber(text))
     if not name then return nil, "No hay ningún hechizo con ese número." end
   end
   local list = ns.char[kind]
@@ -88,6 +88,21 @@ end
 ---------------------------------------------------------------------------
 -- Lectura de auras
 ---------------------------------------------------------------------------
+-- Leer la aura n.º i: con C_UnitAuras en los clientes nuevos; si no, UnitBuff/UnitDebuff.
+-- Devuelve lo mismo que UnitBuff: nombre, icono, acumulaciones, tipo, duración, fin, quién la puso
+local function auraGetter(filter)
+  if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
+    return function(unit, i)
+      local a = C_UnitAuras.GetAuraDataByIndex(unit, i, filter)
+      if a then
+        return a.name, a.icon, a.applications, a.dispelName, a.duration, a.expirationTime, a.sourceUnit
+      end
+    end
+  end
+  return filter == "HELPFUL" and UnitBuff or UnitDebuff
+end
+local getBuff, getDebuff = auraGetter("HELPFUL"), auraGetter("HARMFUL")
+
 -- [nombre en minúsculas] = aura (cualquiera) y, aparte, las puestas por ti
 local function scan(unit, getter)
   local any, mine = {}, {}
@@ -128,11 +143,12 @@ local function newIcon(row)
 end
 
 local function newRow(kind)
-  local row = CreateFrame("Frame", nil, ns.anchor)
+  local row = CreateFrame("Frame", "Attacking_" .. kind, UIParent)
   row:SetSize(1, 1)
   row.kind = kind
   row.icons = {}
   for i = 1, MAX_ICONS do row.icons[i] = newIcon(row) end
+  ns.MakeMover(kind, row) -- cada fila se coloca por separado en modo mover
   return row
 end
 
@@ -168,7 +184,7 @@ end
 ---------------------------------------------------------------------------
 local function wanted()
   local db = ns.db
-  if not db.locked then return true end
+  if ns.IsDemo() then return true end
   if db.auraWhen == "always" then return true end
   if db.auraWhen == "combat" then
     return UnitAffectingCombat("player") or ns.attacking or ns.shooting
@@ -180,7 +196,7 @@ end
 local function demoList(list)
   local out, now = {}, GetTime()
   for i = 1, math.min(3, #list) do
-    local _, _, icon = GetSpellInfo(list[i].name)
+    local icon = ns.SpellIcon(list[i].name)
     out[i] = { icon = icon or 134400, count = 0, duration = 30, expires = now + 30 - (now * 3 + i * 7) % 30 }
   end
   return out
@@ -189,7 +205,7 @@ end
 local function collect(row, enabled, unit, getter)
   local db, list = ns.db, ns.char[row.kind]
   if not enabled then return {} end
-  if not db.locked then return demoList(list) end
+  if ns.IsDemo() then return demoList(list) end
   if unit == "target" and (not UnitExists("target") or not UnitCanAttack("player", "target")) then return {} end
   local any, mine = scan(unit, getter)
   local out = {}
@@ -200,7 +216,9 @@ local function collect(row, enabled, unit, getter)
   return out
 end
 
-local function layoutRow(row, auras, y, border)
+-- Coloca los iconos de una fila. La fila se queda en su sitio (modo mover); aquí solo se
+-- calcula su tamaño. En modo mover se ve aunque esté vacía, para poder colocarla.
+local function layoutRow(row, auras, border, enabled)
   local s = ns.db.auraSize
   local x = 0
   for i, f in ipairs(row.icons) do
@@ -221,31 +239,90 @@ local function layoutRow(row, auras, y, border)
       f:Hide()
     end
   end
-  row:ClearAllPoints()
-  row:SetPoint("TOPLEFT", ns.anchor, "BOTTOMLEFT", 0, y)
-  row:SetShown(#auras > 0)
-  return #auras > 0
+  local unlocked = not ns.db.locked
+  if #auras > 0 then
+    row:SetSize(x - GAP, s)
+  else
+    row:SetSize(s * 3 + GAP * 2, s) -- hueco para poder agarrarla en modo mover
+  end
+  row:SetShown(#auras > 0 or (unlocked and enabled))
 end
 
+-- Si algo de los buffos falla (en combate el juego puede volver «secretos» algunos datos de
+-- las auras), se apaga esta parte durante la sesión y se avisa UNA vez con el error, en vez de
+-- soltar un error en cada repaso y saturar el juego.
+local aurasBroken
+local function breakAuras(err)
+  for _, row in pairs(rows) do row:Hide() end
+  -- auras secretas: es lo normal en combate en Forever; no se apaga, solo se espera a salir
+  if tostring(err):find("secret") then return end
+  aurasBroken = true
+  print("|cff33ccffAttacking|r: los buffos y debuffos han dado un error (" .. tostring(err)
+    .. "). Los apago hasta que recargues. Pásale este mensaje a quien te hizo el addon.")
+end
+
+-- En combate Forever no deja a los addons leer las auras. Así que se guarda lo que había
+-- al empezar el combate y se sigue contando a partir de ahí: los buffos que ya tenías se
+-- vacían y desaparecen al acabarse; los que consigas en combate no se ven. Si cambias de
+-- objetivo en combate, la fila de debuffos se vacía hasta salir de combate.
+local snap = { buffs = {}, debuffs = {} }
+
+-- Las del recuerdo que aún no se han acabado
+local function alive(list, now)
+  local out = {}
+  for _, a in ipairs(list) do
+    if a.duration == 0 or a.expires == 0 or a.expires > now then out[#out + 1] = a end
+  end
+  return out
+end
+
+function ns.ForgetTargetDebuffs()
+  snap.debuffs = {}
+end
+
+local warnedCombat
+local function inCombatMode()
+  if not ns.inCombat or ns.IsDemo() then return false end
+  if not warnedCombat and (ns.db.auraBuffs or ns.db.auraDebuffs) then
+    warnedCombat = true
+    print("|cff33ccffAttacking|r: en combate el juego no deja a los addons leer buffos ni debuffos. "
+      .. "Se siguen mostrando los que tenías al empezar el combate (los nuevos no se ven).")
+  end
+  return true
+end
+
+local updateAurasImpl
 function ns.UpdateAuras()
+  if aurasBroken then return end
+  local ok, err = pcall(updateAurasImpl)
+  if not ok then breakAuras(err) end
+end
+
+updateAurasImpl = function()
   -- las listas se crean al entrar al juego, un instante después que el icono del golpe
-  if not ns.anchor or not ns.char or not ns.char.buffs or not ns.char.debuffs then return end
+  if not ns.built or not ns.char or not ns.char.buffs or not ns.char.debuffs then return end
   if not rows.buffs then
     rows.buffs = newRow("buffs")
     rows.debuffs = newRow("debuffs")
   end
   local db = ns.db
-  local show = wanted()
-  local buffs = show and collect(rows.buffs, db.auraBuffs, "player", UnitBuff) or {}
-  local debuffs = show and collect(rows.debuffs, db.auraDebuffs, "target", UnitDebuff) or {}
-
-  -- debajo de los segundos del golpe (si se ven), y cada fila con sitio para su tiempo
-  local y = -(db.showText and 20 or 6)
-  local step = db.auraSize + 14
-  if layoutRow(rows.buffs, buffs, y, BUFF_BORDER) then y = y - step end
-  layoutRow(rows.debuffs, debuffs, y, DEBUFF_BORDER)
-
   local now = GetTime()
+  local buffs, debuffs
+  if inCombatMode() then
+    -- en combate: lo que había al empezar, mientras dure
+    buffs = db.auraBuffs and alive(snap.buffs, now) or {}
+    debuffs = db.auraDebuffs and alive(snap.debuffs, now) or {}
+  else
+    -- fuera de combate se lee siempre (aunque no se vea), para tener el recuerdo al día
+    buffs = collect(rows.buffs, db.auraBuffs, "player", getBuff)
+    debuffs = collect(rows.debuffs, db.auraDebuffs, "target", getDebuff)
+    if not ns.IsDemo() then snap.buffs, snap.debuffs = buffs, debuffs end
+  end
+  if not wanted() then buffs, debuffs = {}, {} end
+
+  layoutRow(rows.buffs, buffs, BUFF_BORDER, db.auraBuffs)
+  layoutRow(rows.debuffs, debuffs, DEBUFF_BORDER, db.auraDebuffs)
+
   for _, row in pairs(rows) do
     for _, f in ipairs(row.icons) do
       if f.aura then paintIcon(f, f.aura, now) end
@@ -258,25 +335,38 @@ end
 ---------------------------------------------------------------------------
 local ev = CreateFrame("Frame")
 local elapsed = 0
+local tick
 ev:SetScript("OnUpdate", function(_, dt)
   elapsed = elapsed + dt
-  if elapsed < 0.1 or not rows.buffs then return end
+  if elapsed < 0.1 or aurasBroken then return end
   elapsed = 0
+  local ok, err = pcall(tick)
+  if not ok then breakAuras(err) end
+end)
+
+-- Repaso cada 0,1 s: aplicar cambios pendientes y avanzar los tiempos
+tick = function()
+  if ns.auraDirty then
+    ns.auraDirty = false
+    updateAurasImpl()
+  end
+  if not rows.buffs then return end
   local now, expired = GetTime(), false
   for _, row in pairs(rows) do
     if row:IsShown() then
       for _, f in ipairs(row.icons) do
         local a = f.aura
         if a then
-          if not ns.db.locked and a.expires <= now then a.expires = now + a.duration end -- prueba en bucle
-          if ns.db.locked and a.duration > 0 and a.expires > 0 and a.expires <= now then expired = true end
+          local demo = ns.IsDemo()
+          if demo and a.expires <= now then a.expires = now + a.duration end -- prueba en bucle
+          if not demo and a.duration > 0 and a.expires > 0 and a.expires <= now then expired = true end
           paintIcon(f, a, now)
         end
       end
     end
   end
-  if expired then ns.UpdateAuras() end
-end)
+  if expired then updateAurasImpl() end
+end
 
 ev:RegisterEvent("PLAYER_LOGIN")
 ev:SetScript("OnEvent", function(self, event, unit)
@@ -289,8 +379,13 @@ ev:SetScript("OnEvent", function(self, event, unit)
     end
     ns.UpdateAuras()
   elseif event == "UNIT_AURA" then
-    if unit == "player" or unit == "target" then ns.UpdateAuras() end
+    -- en combate llega muchísimas veces: se apunta y se actualiza en el siguiente repaso (0,1 s)
+    if unit == "player" or unit == "target" then ns.auraDirty = true end
+  elseif event == "PLAYER_TARGET_CHANGED" then
+    -- en combate no se puede leer el objetivo nuevo: lo recordado era del anterior
+    if ns.inCombat then ns.ForgetTargetDebuffs() end
+    ns.auraDirty = true
   else
-    ns.UpdateAuras()
+    ns.auraDirty = true
   end
 end)

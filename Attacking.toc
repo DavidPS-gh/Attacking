@@ -2,7 +2,7 @@
 ## Title: Attacking
 ## Notes: El tiempo hasta tu siguiente golpe, como un icono que se va rellenando. /attacking
 ## Author: SenorLobo
-## Version: 0.3.0
+## Version: 0.5.0
 ## SavedVariables: AttackingDB
 ## SavedVariablesPerCharacter: AttackingCharDB
 

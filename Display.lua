@@ -1,4 +1,6 @@
--- Attacking: los iconos que se rellenan
+-- Attacking: los iconos que se rellenan.
+-- Cada pieza (mano derecha, mano izquierda, disparo y las dos filas de Auras.lua) se coloca
+-- por separado: en modo mover se arrastra cada una a su sitio.
 local ADDON, ns = ...
 
 local SLOTS = { "mh", "oh", "ranged" }
@@ -10,11 +12,24 @@ local SWORD = {
 }
 local FIST = "Interface\\Icons\\INV_Gauntlets_04" -- sin arma
 local SCALE = { mh = 1, oh = 0.75, ranged = 1 }   -- la mano izquierda, algo más pequeña
-local GAP = 6
-local SIDE_GAP = 80                               -- con el resultado al lado, sitio para el texto
 local CROP = 0.08                                 -- recorte del borde de los iconos del juego
 
--- Resultados del golpe: texto y color
+-- Nombre de cada pieza en modo mover
+local LABELS = {
+  mh = "Mano derecha", oh = "Mano izquierda", ranged = "Disparo",
+  buffs = "Mis buffos", debuffs = "Debuffos del objetivo",
+}
+
+-- Sitio de partida de cada pieza: { punto de la pieza, punto de la pantalla, x, y }
+ns.DEFAULT_POS = {
+  mh = { "CENTER", "CENTER", -50, -160 },
+  oh = { "CENTER", "CENTER", 0, -160 },
+  ranged = { "CENTER", "CENTER", 50, -160 },
+  buffs = { "TOPLEFT", "CENTER", -70, -200 },
+  debuffs = { "TOPLEFT", "CENTER", -70, -245 },
+}
+
+-- Resultados del golpe: texto y color (de momento sin datos en Forever: ver LEEME)
 local RESULTS = {
   MISS     = { t = "¡Fallo!",   c = { 0.85, 0.85, 0.85 } },
   DODGE    = { t = "Esquivado", c = { 1, 0.85, 0.2 } },
@@ -29,12 +44,78 @@ local RESULTS = {
   CRIT     = { t = "¡Crítico!", c = { 1, 0.25, 0.2 }, minor = true },
   GLANCING = { t = "Rozado",    c = { 0.7, 0.7, 0.6 }, minor = true },
 }
-local DEMO = { mh = "MISS", oh = "PARRY", ranged = "DODGE" } -- en modo mover
+local DEMO = { mh = "MISS", oh = "PARRY", ranged = "DODGE" } -- en modo mover / vista previa
 local RESULT_HOLD, RESULT_FADE = 0.8, 0.5
 
-local anchor, label
+local built
 local icons = {}
 
+---------------------------------------------------------------------------
+-- Piezas movibles (también las filas de Auras.lua)
+---------------------------------------------------------------------------
+local movers = {}
+
+function ns.PlaceMover(key)
+  local f = movers[key]
+  local pt = ns.db.pos[key] or ns.DEFAULT_POS[key]
+  f:ClearAllPoints()
+  f:SetPoint(pt[1], UIParent, pt[2], pt[3], pt[4])
+end
+
+function ns.MakeMover(key, f)
+  f:SetMovable(true)
+  f:SetClampedToScreen(true)
+  f:RegisterForDrag("LeftButton")
+  f:SetScript("OnDragStart", f.StartMoving)
+  f:SetScript("OnDragStop", function(self)
+    self:StopMovingOrSizing()
+    local p, _, rp, x, y = self:GetPoint()
+    ns.db.pos[key] = { p, rp, x, y }
+  end)
+  -- clic derecho mientras se mueve: fijarlo todo
+  f:SetScript("OnMouseUp", function(_, button)
+    if button == "RightButton" then ns.SetLocked(true) end
+  end)
+  -- recuadro azul y nombre, solo en modo mover
+  f.moverBG = f:CreateTexture(nil, "BACKGROUND", nil, -8)
+  f.moverBG:SetColorTexture(0.1, 0.4, 0.8, 0.35)
+  f.moverBG:SetPoint("TOPLEFT", -3, 3)
+  f.moverBG:SetPoint("BOTTOMRIGHT", 3, -3)
+  f.moverBG:Hide()
+  f.moverLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  f.moverLabel:SetPoint("BOTTOMLEFT", f, "TOPLEFT", 0, 4)
+  f.moverLabel:SetText(LABELS[key] or key)
+  f.moverLabel:Hide()
+  f:EnableMouse(false)
+  movers[key] = f
+  ns.PlaceMover(key)
+  if ns.StyleMovers then ns.StyleMovers() end
+end
+
+-- Ratón, recuadros, opacidad y nivel de dibujo de todas las piezas
+function ns.StyleMovers()
+  local db = ns.db
+  local unlocked = not db.locked
+  local strata = ns.preview and "FULLSCREEN_DIALOG" or "MEDIUM"
+  for _, f in pairs(movers) do
+    f:EnableMouse(unlocked)
+    f.moverBG:SetShown(unlocked)
+    f.moverLabel:SetShown(unlocked)
+    -- moviendo se ve todo opaco para colocarlo bien; si no, con la opacidad elegida
+    f:SetAlpha(unlocked and 1 or (db.alpha or 1))
+    -- (cambiar el nivel de dibujo es caro: solo si de verdad cambia)
+    if f:GetFrameStrata() ~= strata then f:SetFrameStrata(strata) end
+  end
+end
+
+function ns.ResetPosition()
+  ns.db.pos = {}
+  for key in pairs(movers) do ns.PlaceMover(key) end
+end
+
+---------------------------------------------------------------------------
+-- Iconos del golpe
+---------------------------------------------------------------------------
 local function texFor(slot)
   if ns.db.iconStyle == "weapon" then
     local t = GetInventoryItemTexture("player", INV[slot])
@@ -45,7 +126,7 @@ local function texFor(slot)
 end
 
 local function newIcon(slot)
-  local f = CreateFrame("Frame", nil, anchor, "BackdropTemplate")
+  local f = CreateFrame("Frame", "Attacking_" .. slot, UIParent, "BackdropTemplate")
   f:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
   f:SetBackdropBorderColor(0, 0, 0, 1)
 
@@ -90,6 +171,7 @@ local function newIcon(slot)
 
   f.slot = slot
   f:Hide()
+  ns.MakeMover(slot, f)
   return f
 end
 
@@ -107,7 +189,7 @@ local function setFill(f, p)
 end
 
 function ns.UpdateTextures()
-  if not anchor then return end
+  if not built then return end
   for _, slot in ipairs(SLOTS) do
     local tex = texFor(slot)
     icons[slot].base:SetTexture(tex)
@@ -116,62 +198,60 @@ function ns.UpdateTextures()
 end
 
 local function hasOffHand()
-  local _, oh = UnitAttackSpeed("player")
-  return oh ~= nil and oh > 0
+  return ns.SpeedOf("oh") ~= nil -- (la velocidad en combate es secreta: ver Attacking.lua)
 end
 
--- Qué iconos se ven y dónde
+-- Fuera del disparo, el icono de disparo solo tiene sentido para cazadores con arma a distancia
+local function hunterWithRanged()
+  local _, class = UnitClass("player")
+  return class == "HUNTER" and GetInventoryItemID("player", INV.ranged) ~= nil
+end
+
+-- Según «Cuándo se ve»: ¿toca enseñar los iconos aunque no estés atacando?
+local function shownByMode()
+  local mode = ns.db.iconWhen
+  return mode == "always" or (mode == "combat" and ns.inCombat)
+end
+
+-- Qué iconos se ven y cómo
 function ns.Refresh()
-  if not anchor then return end
+  if not built then return end
   local db = ns.db
   local want
-  if not db.locked then
-    -- para colocarlo: se ven todos los que tengas activados, con un relleno de prueba
+  if ns.IsDemo() then
+    -- para colocarlo o en la vista previa: se ven todos los que tengas activados
     want = { mh = true, oh = db.showOff, ranged = db.showRanged }
   else
+    local byMode = shownByMode()
+    -- «atacando» = el juego lo dice, o su barra de golpe está en marcha
+    local melee = ns.attacking or ns.BlizShown("mh") or byMode
+    local shooting = ns.shooting or ns.BlizShown("ranged")
     want = {
-      mh = ns.attacking,
-      oh = ns.attacking and db.showOff and hasOffHand(),
-      ranged = ns.shooting and db.showRanged,
+      mh = melee,
+      oh = (melee or ns.BlizShown("oh")) and db.showOff and hasOffHand(),
+      ranged = db.showRanged and (shooting or (byMode and hunterWithRanged())),
     }
   end
 
-  local side = db.showResult and db.resultPos == "side"
-  local gap = side and SIDE_GAP or GAP
-  local x = 0
+  local side = db.resultPos == "side"
   for _, slot in ipairs(SLOTS) do
     local f = icons[slot]
     if want[slot] then
       local s = db.size * SCALE[slot]
       f:SetSize(s, s)
       f.glow:SetSize(s * 1.8, s * 1.8)
-      f:ClearAllPoints()
-      f:SetPoint("LEFT", anchor, "LEFT", x, 0)
       f.result:ClearAllPoints()
       if side then
         f.result:SetPoint("LEFT", f, "RIGHT", 6, 0)
       else
         f.result:SetPoint("BOTTOM", f, "TOP", 0, 3)
       end
-      x = x + s + gap
       f:Show()
     else
       f:Hide()
     end
   end
-  anchor:SetSize(math.max(x - gap, db.size), db.size)
-
-  -- modo mover
-  anchor:EnableMouse(not db.locked)
-  if db.locked then
-    anchor:SetBackdropColor(0, 0, 0, 0)
-    anchor:SetBackdropBorderColor(0, 0, 0, 0)
-    label:Hide()
-  else
-    anchor:SetBackdropColor(0.1, 0.4, 0.8, 0.25)
-    anchor:SetBackdropBorderColor(0.3, 0.6, 1, 0.9)
-    label:Show()
-  end
+  ns.StyleMovers()
   if ns.UpdateAuras then ns.UpdateAuras() end
 end
 
@@ -181,12 +261,12 @@ local function setResult(f, kind)
   f.result:SetTextColor(r.c[1], r.c[2], r.c[3])
 end
 
--- Llamado desde Attacking.lua con lo que ha pasado en el golpe
+-- Llamado con lo que ha pasado en el golpe (de momento no hay de dónde sacarlo en Forever)
 function ns.ShowResult(slot, kind)
   local db = ns.db
   local f = icons[slot]
   local r = RESULTS[kind]
-  if not f or not r or not db.showResult or not db.locked then return end
+  if not f or not r or not db.showResult or ns.IsDemo() then return end
   if r.minor and not db.resultCrit then return end
   setResult(f, kind)
   f.resultUntil = GetTime() + RESULT_HOLD + RESULT_FADE
@@ -194,30 +274,97 @@ function ns.ShowResult(slot, kind)
   f.result:Show()
 end
 
-function ns.SavePosition()
-  local p, _, rp, x, y = anchor:GetPoint()
-  ns.db.point = { p, rp, x, y }
+-- Prueba en marcha (relleno en bucle y textos de ejemplo): al desbloquear para mover,
+-- o mientras están abiertos los ajustes (vista previa)
+function ns.IsDemo()
+  return not ns.db.locked or ns.preview == true
 end
 
-function ns.ResetPosition()
-  ns.db.point = { unpack(ns.DEFAULTS.point) }
-  anchor:ClearAllPoints()
-  anchor:SetPoint(ns.db.point[1], UIParent, ns.db.point[2], ns.db.point[3], ns.db.point[4])
+function ns.SetPreview(on)
+  on = on and true or false
+  if ns.preview == on then return end
+  ns.preview = on
+  ns.Refresh()
 end
 
 function ns.SetLocked(locked)
   ns.db.locked = locked
+  if not locked then
+    print("|cff33ccffAttacking|r: arrastra cada pieza a su sitio. Clic derecho en cualquiera para fijarlas.")
+  end
   ns.Refresh()
   if ns.RefreshOptions then ns.RefreshOptions() end
 end
 
-local function onUpdate()
+---------------------------------------------------------------------------
+-- Barras de golpe de Blizzard
+---------------------------------------------------------------------------
+-- OJO (0.4.0): ponerlas invisibles EN CADA FOTOGRAMA provocó un tira y afloja con la barra de
+-- Forever (sonido entrecortado y aviso de rendimiento). Ahora solo se toca su transparencia
+-- cuando cambia la opción o aparece una barra nueva, nunca en bucle.
+local touched = {}   -- [marco] = transparencia que le pusimos
+function ns.ApplyBlizzardAlpha()
+  for _, slot in ipairs(SLOTS) do
+    local f = ns.BlizFrame(slot)
+    if f then
+      if ns.db.hideBlizzard then
+        if touched[f] ~= 0 then f:SetAlpha(0) touched[f] = 0 end
+      elseif touched[f] then
+        f:SetAlpha(1)   -- solo si la habíamos tocado nosotros
+        touched[f] = nil
+      end
+    end
+  end
+end
+
+-- Si alguna barra del juego aparece o desaparece, se recolocan los iconos.
+-- Se mira 10 veces por segundo y se recoloca como mucho 5 veces por segundo.
+local lastBliz, watchT, lastRefresh = nil, 0, 0
+local function watchBlizzard(dt)
+  watchT = watchT + dt
+  if watchT < 0.1 then return end
+  watchT = 0
+  local key = ""
+  for _, slot in ipairs(SLOTS) do
+    local f = ns.BlizFrame(slot)
+    key = key .. ((f and f:IsShown()) and "1" or "0")
+  end
+  if key ~= lastBliz and GetTime() - lastRefresh >= 0.2 then
+    lastBliz = key
+    lastRefresh = GetTime()
+    ns.ApplyBlizzardAlpha()
+    ns.Refresh()
+  end
+end
+
+---------------------------------------------------------------------------
+-- Cada fotograma
+---------------------------------------------------------------------------
+local onUpdateImpl
+
+-- Lo que se hace en cada fotograma, protegido: si falla, NO se suelta un error por fotograma
+-- (eso satura el juego y salta el aviso de «tus addons dan muchos problemas»). Se avisa una
+-- vez con el error y el icono se queda quieto.
+local updateBroken
+local function onUpdate(self, dt)
+  if updateBroken then return end
+  local ok, err = pcall(onUpdateImpl, self, dt)
+  if not ok then
+    updateBroken = true
+    print("|cff33ccffAttacking|r: error al dibujar el icono (" .. tostring(err)
+      .. "). Lo paro hasta que recargues. Pásale este mensaje a quien te hizo el addon.")
+  end
+end
+
+onUpdateImpl = function(_, dt)
   local db = ns.db
+  watchBlizzard(dt or 0)
+  local demo = ns.IsDemo()
   for _, slot in ipairs(SLOTS) do
     local f = icons[slot]
     if f:IsShown() then
       local p, rem
-      if db.locked then
+      if not demo then
         p, rem = ns.Progress(slot)
       else
         -- prueba: se rellena en bucle cada 2,5 s
@@ -234,7 +381,7 @@ local function onUpdate()
       -- resultado del golpe: se queda un momento y se desvanece
       if not db.showResult then
         f.result:Hide()
-      elseif not db.locked then
+      elseif demo then
         setResult(f, DEMO[slot])
         f.result:SetAlpha(1)
         f.result:Show()
@@ -252,7 +399,7 @@ local function onUpdate()
 
       -- destello una vez por golpe, al llenarse
       local t = ns.T[slot]
-      if db.locked and p >= 1 and not t.flashed then
+      if not demo and p >= 1 and not t.flashed then
         t.flashed = true
         if db.flash then f.flash:Play() end
       end
@@ -261,32 +408,11 @@ local function onUpdate()
 end
 
 function ns.BuildDisplay()
-  anchor = CreateFrame("Frame", "AttackingAnchor", UIParent, "BackdropTemplate")
-  ns.anchor = anchor -- las filas de buffos (Auras.lua) cuelgan de aquí
-  anchor:SetBackdrop({
-    bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1,
-  })
-  anchor:SetClampedToScreen(true)
-  anchor:SetMovable(true)
-  anchor:RegisterForDrag("LeftButton")
-  anchor:SetScript("OnDragStart", anchor.StartMoving)
-  anchor:SetScript("OnDragStop", function(self)
-    self:StopMovingOrSizing()
-    ns.SavePosition()
-  end)
-  -- clic derecho mientras se mueve: bloquear
-  anchor:SetScript("OnMouseUp", function(_, button)
-    if button == "RightButton" then ns.SetLocked(true) end
-  end)
-  local pt = ns.db.point
-  anchor:SetPoint(pt[1], UIParent, pt[2], pt[3], pt[4])
-
-  label = anchor:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  label:SetPoint("BOTTOM", anchor, "TOP", 0, 4)
-  label:SetText("Attacking: arrastra para mover · clic derecho para fijar")
-
   for _, slot in ipairs(SLOTS) do icons[slot] = newIcon(slot) end
-  anchor:SetScript("OnUpdate", onUpdate)
+  built = true
+  ns.built = true
+  local driver = CreateFrame("Frame")
+  driver:SetScript("OnUpdate", onUpdate)
   ns.UpdateTextures()
   ns.Refresh()
 end
