@@ -235,6 +235,41 @@ local function build()
     end)
   place(panel.hideBlizzard)
 
+  -- Resultado del golpe
+  panel.showResult = check(panel, "Mostrar el resultado del golpe (¡Fallo!, Esquivado, Parado…)",
+    "Junto a la pieza sale un momento qué le ha pasado a tu objetivo: fallo, esquivado, parado, "
+    .. "bloqueado, resistido… Si coincide con tu golpe sale en la pieza de esa mano. Los golpes "
+    .. "normales no enseñan nada.", function(self)
+      db.showResult = self:GetChecked() and true or false
+      changed()
+    end)
+  place(panel.showResult)
+  local function sub(c)
+    c:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 20, y)
+    y = y - 26
+  end
+  panel.resultCrit = check(panel, "También críticos y golpes rozados", nil, function(self)
+    db.resultCrit = self:GetChecked() and true or false
+  end)
+  sub(panel.resultCrit)
+  panel.resultGroup = check(panel, "En grupo, también los que no coinciden con un golpe tuyo",
+    "Yendo en grupo, un fallo que no coincide con tu golpe (por ejemplo, de una habilidad) podría "
+    .. "ser de otro jugador, así que no se enseña. Con esta casilla se enseña igualmente.", function(self)
+      db.resultGroup = self:GetChecked() and true or false
+    end)
+  sub(panel.resultGroup)
+  panel.posSide = check(panel, "Al lado", nil, function()
+    db.resultPos = "side"
+    changed()
+  end)
+  panel.posSide:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 20, y)
+  panel.posTop = check(panel, "Encima", nil, function()
+    db.resultPos = "top"
+    changed()
+  end)
+  panel.posTop:SetPoint("LEFT", panel.posSide, "LEFT", 120, 0)
+  y = y - 26
+
   -- Dibujo del icono (solo en los estilos Icono y Reloj)
   y = y - 8
   panel.iconL = heading("Dibujo del icono:")
@@ -267,6 +302,15 @@ function ns.RefreshOptions()
   panel.showOff:SetChecked(db.showOff)
   panel.showRanged:SetChecked(db.showRanged)
   panel.hideBlizzard:SetChecked(db.hideBlizzard)
+  panel.showResult:SetChecked(db.showResult)
+  panel.resultCrit:SetChecked(db.resultCrit)
+  panel.resultGroup:SetChecked(db.resultGroup)
+  panel.posSide:SetChecked(db.resultPos == "side")
+  panel.posTop:SetChecked(db.resultPos == "top")
+  for _, c in ipairs({ panel.resultCrit, panel.resultGroup, panel.posSide, panel.posTop }) do
+    c:SetEnabled(db.showResult)
+    c.label:SetFontObject(db.showResult and "GameFontHighlight" or "GameFontDisable")
+  end
   panel.styleWeapon:SetChecked(db.iconStyle == "weapon")
   panel.styleSword:SetChecked(db.iconStyle == "sword")
   -- el dibujo del icono solo importa en los estilos con icono

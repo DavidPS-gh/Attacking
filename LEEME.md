@@ -23,6 +23,8 @@ En Icono y Reloj se elige el dibujo: el arma que llevas equipada o una espada (y
 - **Tamaño** y **opacidad** (20–100 %).
 - Segundos que faltan, destello, piezas de mano izquierda y de disparo.
 - **Ocultar la barra de golpe de Blizzard** (en pruebas, desactivado): la vuelve invisible pero sigue funcionando.
+- **Resultado del golpe** (activado): junto a la pieza sale un momento, con su color, qué le ha pasado a tu objetivo: ¡Fallo!, Esquivado, Parado, Bloqueado, Desviado, Absorbido, Resistido, Inmune, Evade y, si quieres, ¡Crítico! y Rozado. Los golpes normales no enseñan nada. Puede ir al lado (en barra y puntos, detrás de los segundos) o encima.
+  - El juego dice qué le pasa a tu objetivo pero no quién le ha atacado. Si coincide con el reinicio de tu barra de golpe, es tuyo y sale en la pieza de esa mano (también en grupo). Si no coincide con nada (por ejemplo, una habilidad que falla), solo sale yendo solo, salvo que marques «En grupo, también los que no coinciden».
 
 ## Colocar las piezas
 - `/attacking mover` (o «Desbloquear para mover»): cada pieza sale con un recuadro azul y su nombre y **se arrastra por separado**. Clic derecho en cualquiera (o «Fijar las piezas») las deja fijas; fijas no reciben clics.
@@ -34,8 +36,10 @@ En Icono y Reloj se elige el dibujo: el arma que llevas equipada o una espada (y
 WoW Forever pone varias limitaciones a los addons (vistas probando en el juego):
 - **No se puede leer el registro de combate** (el juego lo bloquea con un aviso), así que Attacking no sabe por su cuenta cuándo golpeas. Lo que hace es **leer el avance de la barra de golpe del propio juego** (`SwingTimerMainHandFrame`, `SwingTimerRangedFrame` y, si existe, la de la mano izquierda). Por eso esa barra tiene que estar activada en los ajustes del juego.
 - La barra del juego va de 0 a 1 y en combate la velocidad de ataque es «secreta» para los addons. Los segundos se calculan **midiendo el ritmo de la propia barra** desde el último golpe, así que notan los cambios de velocidad (Aluvión…). Solo al principio de cada golpe se usa la velocidad leída fuera de combate.
+- Si el objetivo se aleja o huye y no puedes golpearlo, la barra del juego se queda quieta al principio. Cuando lleva parada más de lo que dura un golpe, Attacking lo muestra **lleno**: el golpe está listo y saldrá en cuanto vuelvas a tenerlo a tiro.
 - La barra de disparo del juego está visible aunque no dispares: la pieza de disparo solo sale cuando el juego avisa de que empiezas a disparar.
-- Por las mismas limitaciones se quitaron el seguimiento de buffos y debuffos (en combate no se pueden leer) y el texto de resultado del golpe (¡Fallo!, Parado…; sin registro de combate no hay de dónde sacarlo).
+- Por las mismas limitaciones se quitó el seguimiento de buffos y debuffos (en combate no se pueden leer).
+- El resultado del golpe sale de `UNIT_COMBAT`, que Forever sí permite (lo que le pasa a tu objetivo).
 - `/attacking debug` escribe 5 segundos en el chat lo que se lee de las barras del juego (para diagnosticar).
 
 ## Datos guardados

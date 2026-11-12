@@ -26,6 +26,25 @@ local COLORS = {
 
 local LABELS = { mh = "Mano derecha", oh = "Mano izquierda", ranged = "Disparo" }
 
+-- Resultado del golpe: texto y color
+local RESULTS = {
+  MISS     = { t = "¡Fallo!",   c = { 0.85, 0.85, 0.85 } },
+  DODGE    = { t = "Esquivado", c = { 1, 0.85, 0.2 } },
+  PARRY    = { t = "Parado",    c = { 1, 0.5, 0.15 } },
+  BLOCK    = { t = "Bloqueado", c = { 0.55, 0.75, 1 } },
+  DEFLECT  = { t = "Desviado",  c = { 1, 0.85, 0.2 } },
+  ABSORB   = { t = "Absorbido", c = { 0.8, 0.8, 1 } },
+  RESIST   = { t = "Resistido", c = { 0.75, 0.55, 1 } },
+  REFLECT  = { t = "Reflejado", c = { 0.75, 0.55, 1 } },
+  IMMUNE   = { t = "Inmune",    c = { 1, 1, 1 } },
+  EVADE    = { t = "Evade",     c = { 1, 1, 1 } },
+  CRIT     = { t = "¡Crítico!", c = { 1, 0.25, 0.2 }, minor = true },
+  GLANCING = { t = "Rozado",    c = { 0.7, 0.7, 0.6 }, minor = true },
+}
+local DEMO_RESULT = { mh = "MISS", oh = "PARRY", ranged = "DODGE" } -- en la vista previa
+local RESULT_HOLD, RESULT_FADE = 0.8, 0.5
+local MATCH_WINDOW = 0.35 -- un resultado es tuyo si tu barra se reinició a menos de esto (s)
+
 -- Sitio de partida de cada pieza: { punto de la pieza, punto de la pantalla, x, y }.
 -- Iconos en fila; barras y puntos uno debajo de otro (son anchos).
 local function defaultPos(key)
@@ -289,6 +308,11 @@ local function newPiece(slot)
   -- segundos que faltan
   f.text = f:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
 
+  -- resultado del golpe (al lado o encima; se coloca en applyStyle)
+  f.result = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  f.result:SetShadowOffset(1, -1)
+  f.result:Hide()
+
   f:Hide()
   makeMover(slot, f)
   return f
@@ -337,7 +361,64 @@ local function applyStyle(f)
     end
     f.text:SetPoint("LEFT", f, "RIGHT", 6, 0)
   end
+  -- resultado: encima, o al lado (en barra y puntos, a continuación de los segundos)
+  f.result:ClearAllPoints()
+  if db.resultPos == "top" then
+    f.result:SetPoint("BOTTOM", f, "TOP", 0, 3)
+  elseif icon or clock then
+    f.result:SetPoint("LEFT", f, "RIGHT", 6, 0)
+  else
+    f.result:SetPoint("LEFT", f.text, "RIGHT", 6, 0)
+  end
   f.cdStart, f.cdDur = nil, nil
+end
+
+local function setResult(f, kind)
+  local r = RESULTS[kind]
+  f.result:SetText(r.t)
+  f.result:SetTextColor(r.c[1], r.c[2], r.c[3])
+end
+
+local function showResult(slot, kind)
+  local db, f, r = ns.db, pieces[slot], RESULTS[kind]
+  if not f or not r or not f:IsShown() then return end
+  if r.minor and not db.resultCrit then return end
+  setResult(f, kind)
+  f.resultUntil = GetTime() + RESULT_HOLD + RESULT_FADE
+  f.result:SetAlpha(1)
+  f.result:Show()
+end
+
+-- Lo que ha pasado a tu objetivo (Attacking.lua) se reparte entre las piezas: si coincide con
+-- el reinicio de tu barra de golpe, es tuyo y de esa mano. Si no coincide con nada, solo se
+-- enseña yendo solo (en grupo podría ser de otro), salvo que se pida también en grupo.
+local function processResults(now)
+  local q = ns.pendingResults
+  if not q or #q == 0 then return end
+  local db = ns.db
+  local i = 1
+  while q[i] do
+    local item = q[i]
+    if now - item.t < MATCH_WINDOW then
+      i = i + 1 -- aún puede llegar el reinicio de la barra: se espera un poco
+    else
+      table.remove(q, i)
+      if db.showResult and not ns.IsDemo() then
+        local slot, best
+        for _, s in ipairs(SLOTS) do
+          local r = ns.ResetAt(s)
+          if r and pieces[s]:IsShown() then
+            local d = math.abs(r - item.t)
+            if d <= MATCH_WINDOW and (not best or d < best) then slot, best = s, d end
+          end
+        end
+        if not slot and (db.resultGroup or not IsInGroup()) then
+          slot = ns.shooting and "ranged" or "mh"
+        end
+        if slot then showResult(slot, item.kind) end
+      end
+    end
+  end
 end
 
 -- p: 0 = acaba de golpear, 1 = listo. rem: segundos que faltan.
@@ -553,6 +634,7 @@ local DEMO_OFFSET = { mh = 0, oh = 0.8, ranged = 1.6 }
 local function onUpdateImpl(_, dt)
   watchBlizzard(dt or 0)
   local demo = ns.IsDemo()
+  processResults(GetTime())
   for _, slot in ipairs(SLOTS) do
     local f = pieces[slot]
     if f:IsShown() then
@@ -566,6 +648,24 @@ local function onUpdateImpl(_, dt)
         p, rem = ns.Progress(slot)
       end
       setProgress(f, p, rem)
+      -- resultado del golpe: se queda un momento y se desvanece
+      if not ns.db.showResult then
+        f.result:Hide()
+      elseif demo then
+        setResult(f, DEMO_RESULT[slot])
+        f.result:SetAlpha(1)
+        f.result:Show()
+      elseif f.resultUntil then
+        local left = f.resultUntil - GetTime()
+        if left <= 0 then
+          f.resultUntil = nil
+          f.result:Hide()
+        else
+          f.result:SetAlpha(math.min(1, left / RESULT_FADE))
+        end
+      else
+        f.result:Hide()
+      end
       -- destello una vez por golpe, al llenarse
       local t = ns.T[slot]
       if not demo and p >= 1 and not t.flashed then

@@ -28,14 +28,17 @@ ns.DEFAULTS = {
   grid = true,            -- cuadrícula en pantalla al mover las piezas
   snap = true,            -- al soltar una pieza, ajustarla a la cuadrícula (Mayús = sin ajustar)
   gridSize = 32,          -- tamaño de las casillas, en píxeles
+  showResult = true,      -- resultado del golpe junto a la pieza (¡Fallo!, Parado…)
+  resultCrit = true,      -- …incluidos críticos y golpes rozados
+  resultPos = "side",     -- "side" (al lado) o "top" (encima)
+  resultGroup = false,    -- en grupo, enseñar también los que no coinciden con un golpe tuyo
   locked = true,
   pos = {},               -- sitio de cada pieza (mh, oh, ranged); vacío = el de partida
 }
 
 -- Opciones que ya no existen (se borran de los datos guardados)
 local OLD_KEYS = {
-  "showResult", "resultCrit", "resultPos", "auraBuffs", "auraDebuffs", "auraWhen", "auraSize",
-  "seenCombatAuraNote", "point",
+  "auraBuffs", "auraDebuffs", "auraWhen", "auraSize", "seenCombatAuraNote", "point",
 }
 
 local AUTO_SHOT, SHOOT = 75, 5019 -- Disparo automático, Disparar (varitas)
@@ -102,10 +105,16 @@ ns.BLIZ = BLIZ
 local dir = { mh = 1, oh = 1, ranged = 1 } -- 1 = la barra se llena, -1 = se vacía
 local last = {}
 local resetAt = {} -- momento en que la barra empezó el golpe actual (para medir su ritmo)
+local movedAt = {} -- última vez que la barra se movió (para saber si se ha quedado parada)
 local warnedSecret
 
 function ns.BlizFrame(slot)
   return _G[BLIZ[slot]]
+end
+
+-- Cuándo empezó el golpe actual de esa mano (la barra del juego se reinicia en cada golpe tuyo)
+function ns.ResetAt(slot)
+  return resetAt[slot]
 end
 
 -- ¿La barra de Blizzard de ese golpe está visible?
@@ -124,6 +133,7 @@ local function readBar(slot, bar)
   -- En cada golpe la barra salta: si salta hacia abajo es que se llena; si salta hacia
   -- arriba, que se vacía. Así se sabe hacia dónde va sin depender de cómo esté hecha.
   local prev = last[slot]
+  if not prev or math.abs(p - prev) > 0.0005 then movedAt[slot] = GetTime() end
   if prev and math.abs(p - prev) > 0.5 then
     dir[slot] = (p < prev) and 1 or -1
     T[slot].flashed = false -- nuevo golpe: el destello vuelve a estar disponible
@@ -162,6 +172,11 @@ function ns.Progress(slot)
   local p = blizProgress(slot)
   if p then
     if p >= 1 then return 1, 0 end
+    -- Barra parada más de lo que dura un golpe: no estás golpeando (objetivo fuera de alcance,
+    -- huyendo…), así que el golpe está listo y saldrá en cuanto vuelvas a tenerlo a tiro.
+    -- (Forever deja su barra quieta al principio en ese caso y el icono se quedaba vacío.)
+    local still = movedAt[slot] and (GetTime() - movedAt[slot]) or 0
+    if still > math.max(1, (speedOf(slot) or 2) * 1.2) then return 1, 0 end
     local t0 = resetAt[slot]
     if t0 and p >= MIN_MEASURE then
       local t = GetTime() - t0
@@ -175,6 +190,38 @@ function ns.Progress(slot)
   local e = GetTime() - t.start
   if e >= t.dur then return 1, 0 end
   return e / t.dur, t.dur - e
+end
+
+---------------------------------------------------------------------------
+-- Resultado del golpe (UNIT_COMBAT sí está permitido en Forever)
+---------------------------------------------------------------------------
+-- UNIT_COMBAT dice qué le pasa a tu objetivo (esquiva, para, fallo, crítico…) pero no quién le
+-- ha atacado. Se apunta aquí y Display.lua decide de quién es: si coincide con el reinicio de
+-- tu barra de golpe, es tuyo (y de esa mano).
+local MISSES = {
+  MISS = true, DODGE = true, PARRY = true, BLOCK = true, DEFLECT = true, ABSORB = true,
+  RESIST = true, REFLECT = true, IMMUNE = true, EVADE = true,
+}
+ns.pendingResults = {}
+
+-- (dentro de pcall: si algún dato fuera «secreto», compararlo daría error)
+local function resultKind(action, flag)
+  if MISSES[action] then return action end
+  if action == "WOUND" then
+    if flag == "CRITICAL" then return "CRIT" end
+    if flag == "GLANCING" then return "GLANCING" end
+    if flag == "BLOCK_REDUCED" then return "BLOCK" end
+  end
+end
+
+local function onUnitCombat(unit, action, flag)
+  if unit ~= "target" then return end
+  local ok, kind = pcall(resultKind, action, flag)
+  if ok and kind then
+    local q = ns.pendingResults
+    q[#q + 1] = { kind = kind, t = GetTime() }
+    if #q > 10 then table.remove(q, 1) end
+  end
 end
 
 ---------------------------------------------------------------------------
@@ -214,9 +261,13 @@ local function onEvent(self, event, ...)
       "UNIT_SPELLCAST_SUCCEEDED", "UNIT_ATTACK_SPEED",
       "PLAYER_ENTER_COMBAT", "PLAYER_LEAVE_COMBAT", "START_AUTOREPEAT_SPELL", "STOP_AUTOREPEAT_SPELL",
       "PLAYER_EQUIPMENT_CHANGED", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
+      "UNIT_COMBAT",
     }) do
       pcall(self.RegisterEvent, self, e)
     end
+
+  elseif event == "UNIT_COMBAT" then
+    onUnitCombat(...)
 
   elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
     local unit, _, spellID = ...
