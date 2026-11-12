@@ -83,8 +83,8 @@ local function build()
 
   -- Opciones
   local y = -34
-  local function place(c)
-    c:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", -4, y)
+  local function place(c, indent)
+    c:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", -4 + (indent or 0), y)
     y = y - 26
   end
   panel.showText = check(panel, "Mostrar los segundos que faltan (debajo del icono)", nil, function(self)
@@ -107,6 +107,29 @@ local function build()
       changed()
     end)
   place(panel.showRanged)
+
+  -- Resultado del golpe
+  panel.showResult = check(panel, "Mostrar el resultado del golpe (¡Fallo!, Esquivado, Parado…)",
+    "Junto a cada icono sale un momento qué ha pasado con el golpe: fallo, esquivado, parado, "
+    .. "bloqueado, resistido… Los golpes normales no enseñan nada.", function(self)
+      db.showResult = self:GetChecked() and true or false
+      changed()
+    end)
+  place(panel.showResult)
+  panel.resultCrit = check(panel, "También críticos y golpes rozados", nil, function(self)
+    db.resultCrit = self:GetChecked() and true or false
+  end)
+  place(panel.resultCrit, 24)
+  panel.posSide = check(panel, "Al lado del icono", nil, function()
+    db.resultPos = "side"
+    changed()
+  end)
+  place(panel.posSide, 24)
+  panel.posTop = check(panel, "Encima del icono", nil, function()
+    db.resultPos = "top"
+    changed()
+  end)
+  place(panel.posTop, 24)
 
   y = y - 10
   local iconL = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
@@ -134,6 +157,14 @@ function ns.RefreshOptions()
   panel.flash:SetChecked(db.flash)
   panel.showOff:SetChecked(db.showOff)
   panel.showRanged:SetChecked(db.showRanged)
+  panel.showResult:SetChecked(db.showResult)
+  panel.resultCrit:SetChecked(db.resultCrit)
+  panel.posSide:SetChecked(db.resultPos == "side")
+  panel.posTop:SetChecked(db.resultPos == "top")
+  for _, c in ipairs({ panel.resultCrit, panel.posSide, panel.posTop }) do
+    c:SetEnabled(db.showResult)
+    c.label:SetFontObject(db.showResult and "GameFontHighlight" or "GameFontDisable")
+  end
   panel.styleWeapon:SetChecked(db.iconStyle == "weapon")
   panel.styleSword:SetChecked(db.iconStyle == "sword")
 end

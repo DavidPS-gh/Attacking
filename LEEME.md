@@ -14,6 +14,7 @@ El tiempo hasta tu siguiente golpe, como un icono que se va rellenando: gris jus
   - Mano izquierda (opcional), algo más pequeño: si llevas dos armas.
   - Disparo (opcional): mientras disparas con Disparo automático o con una varita.
 - **Opciones**: tamaño, segundos que faltan debajo del icono, destello al estar listo, y el dibujo del icono (el arma que llevas equipada o una espada/arco).
+- **Resultado del golpe** (opcional): junto a cada icono sale un momento, con su color, qué ha pasado: ¡Fallo!, Esquivado, Parado, Bloqueado, Desviado, Absorbido, Resistido, Inmune, Evade y, si quieres, ¡Crítico! y Rozado. Los golpes normales no enseñan nada. Puede salir al lado del icono (los iconos se separan para dejar sitio al texto) o encima. En modo mover se ve un texto de prueba.
 
 ## Cómo cuenta
 - Empieza de nuevo con cada golpe tuyo, también si fallas o te lo esquivan, y con los ataques que sustituyen al golpe normal (Golpe heroico, Rajar, Golpe de raptor, Magullar).

@@ -11,6 +11,9 @@ ns.DEFAULTS = {
   showOff = true,         -- icono de la mano izquierda si llevas dos armas
   showRanged = true,      -- icono de Disparo automático y varitas
   flash = true,           -- destello al estar listo el golpe
+  showResult = true,      -- resultado del golpe junto al icono (¡Fallo!, Parado…)
+  resultCrit = true,      -- …incluidos críticos y golpes rozados
+  resultPos = "side",     -- "side" (a la derecha) o "top" (encima)
   locked = true,
   point = { "CENTER", "CENTER", 0, -160 },
 }
@@ -85,17 +88,47 @@ local function parryHaste()
   t.start = GetTime() - (d - rem)
 end
 
+-- Qué ha pasado con el golpe (para el texto junto al icono): un fallo (MISS, DODGE, PARRY…),
+-- un crítico, un golpe rozado o un bloqueo parcial. Un golpe normal no enseña nada.
+local function outcome(slot, missType, crit, glancing, blocked)
+  if missType then
+    ns.ShowResult(slot, missType)
+  elseif crit then
+    ns.ShowResult(slot, "CRIT")
+  elseif glancing then
+    ns.ShowResult(slot, "GLANCING")
+  elseif blocked and blocked > 0 then
+    ns.ShowResult(slot, "BLOCK")
+  end
+end
+
+-- Posición de los datos en el registro de combate (desde el 12):
+--   SWING_DAMAGE: cantidad, sobrante, escuela, resistido(15), bloqueado(16), absorbido, crítico(18),
+--                 rozado(19), aplastante, mano izquierda(21)
+--   SWING_MISSED: tipo de fallo(12), mano izquierda(13)
+--   SPELL_/RANGE_DAMAGE: id, nombre(13), escuela, cantidad, sobrante, escuela, resistido,
+--                 bloqueado(19), absorbido, crítico(21), rozado(22)
+--   SPELL_/RANGE_MISSED: id, nombre(13), escuela, tipo de fallo(15)
 local playerGUID
 local function onCombatLog()
   local _, sub, _, src, _, _, _, dst, _, _, _,
-    a12, a13, _, a15, _, _, _, _, _, a21 = CombatLogGetCurrentEventInfo()
+    a12, a13, _, a15, a16, _, a18, a19, _, a21, a22 = CombatLogGetCurrentEventInfo()
   if src == playerGUID then
     if sub == "SWING_DAMAGE" then
-      startSwing(a21 and "oh" or "mh")          -- a21 = ¿mano izquierda?
+      local slot = a21 and "oh" or "mh"
+      startSwing(slot)
+      outcome(slot, nil, a18, a19, a16)
     elseif sub == "SWING_MISSED" then
-      startSwing(a13 and "oh" or "mh")          -- a12 = tipo de fallo, a13 = ¿mano izquierda?
+      local slot = a13 and "oh" or "mh"
+      startSwing(slot)
+      outcome(slot, a12)
     elseif (sub == "SPELL_DAMAGE" or sub == "SPELL_MISSED") and nextSwing[a13] then
-      startSwing("mh")                          -- a13 = nombre del hechizo
+      startSwing("mh")
+      if sub == "SPELL_DAMAGE" then outcome("mh", nil, a21, a22, a19) else outcome("mh", a15) end
+    elseif sub == "RANGE_DAMAGE" then
+      outcome("ranged", nil, a21, a22, a19)
+    elseif sub == "RANGE_MISSED" then
+      outcome("ranged", a15)
     end
   elseif dst == playerGUID then
     if (sub == "SWING_MISSED" and a12 == "PARRY") or (sub == "SPELL_MISSED" and a15 == "PARRY") then

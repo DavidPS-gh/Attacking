@@ -11,7 +11,26 @@ local SWORD = {
 local FIST = "Interface\\Icons\\INV_Gauntlets_04" -- sin arma
 local SCALE = { mh = 1, oh = 0.75, ranged = 1 }   -- la mano izquierda, algo más pequeña
 local GAP = 6
+local SIDE_GAP = 80                               -- con el resultado al lado, sitio para el texto
 local CROP = 0.08                                 -- recorte del borde de los iconos del juego
+
+-- Resultados del golpe: texto y color
+local RESULTS = {
+  MISS     = { t = "¡Fallo!",   c = { 0.85, 0.85, 0.85 } },
+  DODGE    = { t = "Esquivado", c = { 1, 0.85, 0.2 } },
+  PARRY    = { t = "Parado",    c = { 1, 0.5, 0.15 } },
+  BLOCK    = { t = "Bloqueado", c = { 0.55, 0.75, 1 } },
+  DEFLECT  = { t = "Desviado",  c = { 1, 0.85, 0.2 } },
+  ABSORB   = { t = "Absorbido", c = { 0.8, 0.8, 1 } },
+  RESIST   = { t = "Resistido", c = { 0.75, 0.55, 1 } },
+  REFLECT  = { t = "Reflejado", c = { 0.75, 0.55, 1 } },
+  IMMUNE   = { t = "Inmune",    c = { 1, 1, 1 } },
+  EVADE    = { t = "Evade",     c = { 1, 1, 1 } },
+  CRIT     = { t = "¡Crítico!", c = { 1, 0.25, 0.2 }, minor = true },
+  GLANCING = { t = "Rozado",    c = { 0.7, 0.7, 0.6 }, minor = true },
+}
+local DEMO = { mh = "MISS", oh = "PARRY", ranged = "DODGE" } -- en modo mover
+local RESULT_HOLD, RESULT_FADE = 0.8, 0.5
 
 local anchor, label
 local icons = {}
@@ -64,6 +83,11 @@ local function newIcon(slot)
   f.text = f:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
   f.text:SetPoint("TOP", f, "BOTTOM", 0, -2)
 
+  -- resultado del golpe (al lado o encima; se coloca en ns.Refresh)
+  f.result = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  f.result:SetShadowOffset(1, -1)
+  f.result:Hide()
+
   f.slot = slot
   f:Hide()
   return f
@@ -112,6 +136,8 @@ function ns.Refresh()
     }
   end
 
+  local side = db.showResult and db.resultPos == "side"
+  local gap = side and SIDE_GAP or GAP
   local x = 0
   for _, slot in ipairs(SLOTS) do
     local f = icons[slot]
@@ -121,13 +147,19 @@ function ns.Refresh()
       f.glow:SetSize(s * 1.8, s * 1.8)
       f:ClearAllPoints()
       f:SetPoint("LEFT", anchor, "LEFT", x, 0)
-      x = x + s + GAP
+      f.result:ClearAllPoints()
+      if side then
+        f.result:SetPoint("LEFT", f, "RIGHT", 6, 0)
+      else
+        f.result:SetPoint("BOTTOM", f, "TOP", 0, 3)
+      end
+      x = x + s + gap
       f:Show()
     else
       f:Hide()
     end
   end
-  anchor:SetSize(math.max(x - GAP, db.size), db.size)
+  anchor:SetSize(math.max(x - gap, db.size), db.size)
 
   -- modo mover
   anchor:EnableMouse(not db.locked)
@@ -140,6 +172,25 @@ function ns.Refresh()
     anchor:SetBackdropBorderColor(0.3, 0.6, 1, 0.9)
     label:Show()
   end
+end
+
+local function setResult(f, kind)
+  local r = RESULTS[kind]
+  f.result:SetText(r.t)
+  f.result:SetTextColor(r.c[1], r.c[2], r.c[3])
+end
+
+-- Llamado desde Attacking.lua con lo que ha pasado en el golpe
+function ns.ShowResult(slot, kind)
+  local db = ns.db
+  local f = icons[slot]
+  local r = RESULTS[kind]
+  if not f or not r or not db.showResult or not db.locked then return end
+  if r.minor and not db.resultCrit then return end
+  setResult(f, kind)
+  f.resultUntil = GetTime() + RESULT_HOLD + RESULT_FADE
+  f.result:SetAlpha(1)
+  f.result:Show()
 end
 
 function ns.SavePosition()
@@ -179,6 +230,25 @@ local function onUpdate()
       else
         f.text:SetText("")
       end
+      -- resultado del golpe: se queda un momento y se desvanece
+      if not db.showResult then
+        f.result:Hide()
+      elseif not db.locked then
+        setResult(f, DEMO[slot])
+        f.result:SetAlpha(1)
+        f.result:Show()
+      elseif f.resultUntil then
+        local left = f.resultUntil - GetTime()
+        if left <= 0 then
+          f.resultUntil = nil
+          f.result:Hide()
+        else
+          f.result:SetAlpha(math.min(1, left / RESULT_FADE))
+        end
+      else
+        f.result:Hide()
+      end
+
       -- destello una vez por golpe, al llenarse
       local t = ns.T[slot]
       if db.locked and p >= 1 and not t.flashed then
