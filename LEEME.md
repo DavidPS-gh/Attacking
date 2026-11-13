@@ -24,6 +24,7 @@ En Icono y Reloj se elige el dibujo: el arma que llevas equipada o una espada (y
 - Segundos que faltan, destello, piezas de mano izquierda y de disparo.
 - **Ocultar la barra de golpe de Blizzard** (en pruebas, desactivado): la vuelve invisible pero sigue funcionando.
 - **Resultado del golpe** (activado): junto a la pieza sale un momento, con su color, qué le ha pasado a tu objetivo: ¡Fallo!, Esquivado, Parado, Bloqueado, Desviado, Absorbido, Resistido, Inmune, Evade y, si quieres, ¡Crítico! y Rozado. Los golpes normales no enseñan nada. Puede ir al lado (en barra y puntos, detrás de los segundos) o encima.
+  - Su aspecto se ajusta aparte: **tamaño** (8–28), **contraste** (sombra, contorno o contorno grueso), **opacidad** (30–100 %, independiente de la de las piezas) y **duración** (0,5–3 s).
   - El juego dice qué le pasa a tu objetivo pero no quién le ha atacado. Si coincide con el reinicio de tu barra de golpe, es tuyo y sale en la pieza de esa mano (también en grupo). Si no coincide con nada (por ejemplo, una habilidad que falla), solo sale yendo solo, salvo que marques «En grupo, también los que no coinciden».
 
 ## Colocar las piezas
@@ -37,11 +38,16 @@ WoW Forever pone varias limitaciones a los addons (vistas probando en el juego):
 - **No se puede leer el registro de combate** (el juego lo bloquea con un aviso), así que Attacking no sabe por su cuenta cuándo golpeas. Lo que hace es **leer el avance de la barra de golpe del propio juego** (`SwingTimerMainHandFrame`, `SwingTimerRangedFrame` y, si existe, la de la mano izquierda). Por eso esa barra tiene que estar activada en los ajustes del juego.
 - La barra del juego va de 0 a 1 y en combate la velocidad de ataque es «secreta» para los addons. Los segundos se calculan **midiendo el ritmo de la propia barra** desde el último golpe, así que notan los cambios de velocidad (Aluvión…). Solo al principio de cada golpe se usa la velocidad leída fuera de combate.
 - **Manda la barra del juego**: mientras se mueve, la pieza se va cargando con sus segundos; si lleva medio segundo quieta (sin atacar, objetivo fuera de alcance o huyendo), la pieza se ve **llena**: el golpe está listo y saldrá en cuanto lo tengas a tiro. Así no depende de que el juego avise de que empiezas a atacar (ese aviso se pierde, por ejemplo, si ya atacabas al hacer `/reload`).
+- **En combate el juego a veces vuelve «secretos» los datos de la barra de golpe** (no se pueden leer). Mientras pasa, Attacking usa el mismo reloj propio de abajo y vuelve a leer la barra en cuanto se deja.
+- **A veces la barra de golpe del juego se congela** (se queda quieta con «0.0» aunque sigas pegando; es cosa del propio juego). Yendo solo, Attacking tira entonces de un reloj propio para la mano derecha: cada golpe sobre tu objetivo (lo dice `UNIT_COMBAT`) lo reinicia. Lo que le pasa al objetivo justo después de lanzar una habilidad (0,4 s) se toma como daño de la habilidad y no cuenta, salvo las que son un golpe del arma (Golpe heroico, Rajar, Golpe de raptor, Abatir, Embate). Empieza con la velocidad leída fuera de combate y, tras dos golpes seguidos, usa el tiempo real entre ellos (así nota la celeridad). En grupo no se puede (no se sabe de quién es cada golpe) y la pieza se ve llena.
 - Los textos de resultado salen al instante si coinciden con tu golpe; si no, como mucho 0,1 s después yendo solo.
 - La barra de disparo del juego está visible aunque no dispares: la pieza de disparo solo sale cuando el juego avisa de que empiezas a disparar.
 - Por las mismas limitaciones se quitó el seguimiento de buffos y debuffos (en combate no se pueden leer).
 - El resultado del golpe sale de `UNIT_COMBAT`, que Forever sí permite (lo que le pasa a tu objetivo).
 - `/attacking debug` escribe 5 segundos en el chat lo que se lee de las barras del juego y si el addon cree que atacas (para diagnosticar).
+
+## Idiomas
+Español, inglés, francés, alemán, portugués, italiano y ruso (estos cinco últimos, borradores sin revisión nativa). Por defecto, el del juego; se cambia con el botón «Idioma» de arriba a la derecha en los ajustes (cada clic pasa al siguiente) y se ve al recargar. Las traducciones están en `Locales\`; lo que falte sale en español. `/attacking move` y `/attacking test` funcionan igual que `mover` y `prueba`.
 
 ## Datos guardados
 - `AttackingDB` (toda la cuenta): estilo, posiciones, tamaño y opciones.

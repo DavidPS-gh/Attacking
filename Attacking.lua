@@ -8,6 +8,7 @@
 --   · Todo lo que se hace en cada fotograma o evento va dentro de pcall: un error repetido
 --     dispara el aviso de «tus addons dan muchos problemas».
 local ADDON, ns = ...
+local L = function(...) return ns.L(...) end
 
 ns.VERSION = 4 -- versión de los datos guardados
 -- 2: «ocultar la barra de Blizzard» vuelve a estar desactivado (en la 1 causaba un bucle)
@@ -32,6 +33,10 @@ ns.DEFAULTS = {
   resultCrit = true,      -- …incluidos críticos y golpes rozados
   resultPos = "side",     -- "side" (al lado) o "top" (encima)
   resultGroup = false,    -- en grupo, enseñar también los que no coinciden con un golpe tuyo
+  resultSize = 14,        -- tamaño del texto de resultado
+  resultOutline = "outline", -- contraste: "shadow" (sombra), "outline" (contorno) o "thick" (contorno grueso)
+  resultAlpha = 1,        -- opacidad del texto de resultado (aparte de la de las piezas)
+  resultTime = 1.3,       -- segundos que se ve (incluido el desvanecido)
   locked = true,
   pos = {},               -- sitio de cada pieza (mh, oh, ranged); vacío = el de partida
 }
@@ -107,7 +112,6 @@ local last = {}
 local resetAt = {} -- momento en que la barra empezó el golpe actual (para medir su ritmo)
 local movedAt = {} -- última vez que la barra se movió (para saber si se ha quedado parada)
 local movedFrom = {} -- valor de la barra la última vez que se vio moverse
-local warnedSecret
 
 -- ¿Tienes puesto el ataque automático? El aviso del juego (PLAYER_ENTER_COMBAT) puede perderse
 -- (p. ej. si ya atacabas al hacer /reload), así que también se pregunta por el hechizo «Atacar».
@@ -140,12 +144,21 @@ function ns.BlizShown(slot)
   return f ~= nil and f:IsShown()
 end
 
--- Avance 0..1 leído de la barra de Blizzard. Todo el cálculo va dentro de pcall (por si algún
--- dato fuera «secreto»): si falla, se deja de leer la barra durante la sesión.
+-- ¿Es un valor «secreto»? (en combate Forever a veces vuelve secretos los datos de la barra de
+-- golpe: no se pueden comparar ni operar). Si el cliente no trae issecretvalue, nunca lo es.
+local function isSecret(v)
+  return issecretvalue ~= nil and issecretvalue(v) and true or false
+end
+
+-- Avance 0..1 leído de la barra de Blizzard. Va dentro de pcall (por si algún dato fuera
+-- «secreto» sin que issecretvalue lo diga). Si no se puede leer, devuelve nil y se usa el reloj
+-- propio; se vuelve a intentar en el siguiente fotograma.
 local function readBar(slot, bar)
-  local lo, hi = bar:GetMinMaxValues()
   local v = bar:GetValue()
-  if not hi or not lo or hi <= lo then return nil end
+  if isSecret(v) then return nil end
+  local lo, hi = bar:GetMinMaxValues()
+  if isSecret(lo) or isSecret(hi) then lo, hi = 0, 1 end -- va de 0 a 1
+  if v == nil or not hi or not lo or hi <= lo then return nil end
   local p = (v - lo) / (hi - lo)
   -- En cada golpe la barra salta: si salta hacia abajo es que se llena; si salta hacia
   -- arriba, que se vacía. Así se sabe hacia dónde va sin depender de cómo esté hecha.
@@ -169,18 +182,15 @@ local function readBar(slot, bar)
 end
 
 local function blizProgress(slot)
-  if ns.blizBroken then return nil end
   local f = _G[BLIZ[slot]]
   local bar = f and f.StatusBar
-  if not bar or not f:IsShown() then return nil end
+  -- Se lee aunque el juego la tenga oculta: si sigue avanzando, vale; si no, la detección de
+  -- barra quieta (más abajo) deja la pieza llena.
+  if not bar then return nil end
   local ok, p = pcall(readBar, slot, bar)
   if not ok then
-    ns.blizBroken = true
-    if not warnedSecret then
-      warnedSecret = true
-      print("|cff33ccffAttacking|r: no puedo leer la barra de golpe del juego (" .. tostring(p)
-        .. "). Dejo de leerla hasta que recargues. Pásale este mensaje a quien te hizo el addon.")
-    end
+    ns.blizErrAt, ns.blizErr = GetTime(), tostring(p) -- para /attacking debug
+    resetAt[slot] = nil -- sin leerla no se ve el próximo reinicio: la medida ya no vale
     return nil
   end
   return p
@@ -201,13 +211,30 @@ function ns.Progress(slot)
     -- STALL, no estás golpeando (sin atacar, objetivo fuera de alcance, huyendo…): el golpe
     -- está listo y la pieza se ve llena.
     local still = movedAt[slot] and (GetTime() - movedAt[slot]) or math.huge
-    if still > STALL then return 1, 0 end
+    if still > STALL then
+      resetAt[slot] = nil -- parada: el próximo golpe se medirá desde su propio reinicio
+      -- Barra del juego congelada pero sigues atacando: se usa el reloj propio (ver backupSwing)
+      local t = T[slot]
+      if slot == "mh" and t.start and ns.IsAttacking() then
+        local e = GetTime() - t.start
+        if e < t.dur then return e / t.dur, t.dur - e end
+      end
+      return 1, 0
+    end
+    local d = speedOf(slot)
     local t0 = resetAt[slot]
     if t0 and p >= MIN_MEASURE then
       local t = GetTime() - t0
-      return p, t * (1 - p) / p
+      -- Solo si la medida es razonable: si el último reinicio visto es viejo (la barra estuvo
+      -- congelada o secreta y no se vio el salto), t es enorme y salían segundos absurdos.
+      if not d or t <= d * 1.6 then
+        local rem = t * (1 - p) / p
+        if d then rem = math.min(rem, (1 - p) * d * 1.6) end
+        return p, rem
+      end
+      resetAt[slot] = nil
     end
-    return p, (1 - p) * (speedOf(slot) or 0)
+    return p, (1 - p) * (d or 0)
   end
   -- sin barra del juego (solo el disparo puede contarse por su cuenta)
   local active
@@ -242,8 +269,64 @@ local function resultKind(action, flag)
   end
 end
 
-local function onUnitCombat(unit, action, flag)
+-- ¿Es un golpe cuerpo a cuerpo sobre tu objetivo? (fallo, esquiva… o daño físico)
+local function isMeleeHit(action, school)
+  if MISSES[action] then return true end
+  return action == "WOUND" and (school == nil or school == 1)
+end
+
+-- Reloj propio de respaldo para la mano derecha: a veces la barra de golpe del juego se
+-- congela (se queda quieta con «0.0» aunque sigas pegando). Yendo solo, lo que le pasa a tu
+-- objetivo es casi siempre tuyo, así que cada golpe sobre él reinicia este reloj. Lo que llega
+-- muy pronto después de otro golpe (una habilidad instantánea) no cuenta.
+-- Habilidades que SON un golpe del arma (salen con el golpe o lo reinician): Golpe heroico,
+-- Rajar, Golpe de raptor, Abatir y Embate. Se comparan por nombre (así valen todos los rangos).
+local SWING_SPELLS = { 78, 845, 2973, 6807, 1464 }
+local swingNames
+local function spellName(id)
+  if C_Spell and C_Spell.GetSpellName then return C_Spell.GetSpellName(id) end
+  if C_Spell and C_Spell.GetSpellInfo then
+    local i = C_Spell.GetSpellInfo(id)
+    return i and i.name
+  end
+end
+
+-- Lanzas una habilidad: si no es de las que son un golpe, su daño no debe reiniciar el reloj
+local lastCast = 0
+local function onPlayerCast(spellID)
+  if not swingNames then
+    swingNames = {}
+    for _, id in ipairs(SWING_SPELLS) do
+      local n = spellName(id)
+      if n then swingNames[n] = true end
+    end
+  end
+  local n = spellName(spellID)
+  if n and not swingNames[n] then lastCast = GetTime() end
+end
+
+local CAST_WINDOW = 0.4 -- lo que le pase al objetivo hasta esto después de una habilidad es de ella
+local function backupSwing(action, school)
+  if IsInGroup() or ns.shooting or not ns.IsAttacking() then return end
+  local ok, hit = pcall(isMeleeHit, action, school)
+  if not ok or not hit then return end
+  local now = GetTime()
+  if now - lastCast < CAST_WINDOW then return end -- es el golpe de una habilidad, no el tuyo
+  local d = speedOf("mh")
+  if not d then return end
+  local t = T.mh
+  local gap = t.start and (now - t.start)
+  if gap and gap < d * 0.6 then return end
+  -- Ritmo real: en combate la velocidad es secreta y la guardada no nota la celeridad (Arrebato,
+  -- Aluvión…). El tiempo entre dos golpes seguidos, si es razonable, la sustituye.
+  if gap and gap <= d * 1.5 then t.learned = gap end
+  startSwing("mh")
+  if t.learned then t.dur = t.learned end
+end
+
+local function onUnitCombat(unit, action, flag, _, school)
   if unit ~= "target" then return end
+  backupSwing(action, school)
   local ok, kind = pcall(resultKind, action, flag)
   if ok and kind then
     local q = ns.pendingResults
@@ -300,6 +383,7 @@ local function onEvent(self, event, ...)
   elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
     local unit, _, spellID = ...
     if unit == "player" and (spellID == AUTO_SHOT or spellID == SHOOT) then startSwing("ranged") end
+    if unit == "player" then pcall(onPlayerCast, spellID) end
 
   elseif event == "UNIT_ATTACK_SPEED" then
     if ... == "player" then ns.WarmSpeeds() ns.Refresh() end
@@ -322,6 +406,7 @@ local function onEvent(self, event, ...)
     ns.Refresh()
   elseif event == "PLAYER_REGEN_ENABLED" then
     ns.inCombat = false
+    T.mh.learned = nil -- fuera de combate se vuelve a la velocidad leída
     ns.WarmSpeeds()
     ns.Refresh()
 
@@ -339,7 +424,6 @@ ev:SetScript("OnEvent", function(self, event, ...)
   local ok, err = pcall(onEvent, self, event, ...)
   if not ok and not eventErrors[event] then
     eventErrors[event] = true
-    print("|cff33ccffAttacking|r: error con " .. event .. " (" .. tostring(err)
-      .. "). Pásale este mensaje a quien te hizo el addon.")
+    print("|cff33ccffAttacking|r: " .. L("error con %s (%s). Pásale este mensaje a quien te hizo el addon.", event, tostring(err)))
   end
 end)

@@ -1,10 +1,23 @@
 ## Interface: 16001
 ## Title: Attacking
 ## Notes: Cuánto falta para tu siguiente golpe: icono, reloj, barra o puntos. /attacking
+## Notes-enUS: How long until your next swing: icon, clock, bar or dots. /attacking
+## Notes-frFR: Le temps avant votre prochaine attaque : icône, horloge, barre ou points. /attacking
+## Notes-deDE: Wie lange bis zu deinem nächsten Schlag: Symbol, Uhr, Leiste oder Punkte. /attacking
+## Notes-ptBR: Quanto falta para o seu próximo golpe: ícone, relógio, barra ou pontos. /attacking
+## Notes-itIT: Quanto manca al tuo prossimo colpo: icona, orologio, barra o punti. /attacking
+## Notes-ruRU: Сколько осталось до следующего удара: значок, часы, полоса или точки. /attacking
 ## Author: SenorLobo
-## Version: 0.8.2
+## Version: 0.9.0
 ## SavedVariables: AttackingDB
 
+Locale.lua
+Locales\enUS.lua
+Locales\frFR.lua
+Locales\deDE.lua
+Locales\ptBR.lua
+Locales\itIT.lua
+Locales\ruRU.lua
 Attacking.lua
 Display.lua
 Config.lua

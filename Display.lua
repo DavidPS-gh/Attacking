@@ -3,6 +3,7 @@
 -- fina) y «pips» (puntos que se encienden). Cada pieza (mano derecha, mano izquierda, disparo)
 -- se coloca por separado en modo mover.
 local ADDON, ns = ...
+local L = function(...) return ns.L(...) end
 
 local SLOTS = { "mh", "oh", "ranged" }
 local INV = { mh = 16, oh = 17, ranged = 18 } -- ranuras de equipo
@@ -42,7 +43,11 @@ local RESULTS = {
   GLANCING = { t = "Rozado",    c = { 0.7, 0.7, 0.6 }, minor = true },
 }
 local DEMO_RESULT = { mh = "MISS", oh = "PARRY", ranged = "DODGE" } -- en la vista previa
-local RESULT_HOLD, RESULT_FADE = 0.8, 0.5
+-- El texto de resultado dura resultTime segundos en total; los últimos (como mucho 0,5) se desvanece
+local function resultFade()
+  return math.min(0.5, (ns.db.resultTime or 1.3) / 2)
+end
+local OUTLINE = { shadow = "", outline = "OUTLINE", thick = "THICKOUTLINE" }
 local MATCH_WINDOW = 0.25 -- un resultado es tuyo si tu barra se reinició a menos de esto (s)
 local SOLO_WAIT = 0.1     -- yendo solo, lo que se espera como mucho a que llegue el reinicio
 
@@ -184,7 +189,7 @@ local function makeMover(key, f)
   f.moverBG:Hide()
   f.moverLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   f.moverLabel:SetPoint("BOTTOMLEFT", f, "TOPLEFT", 0, 4)
-  f.moverLabel:SetText(LABELS[key])
+  f.moverLabel:SetText(L(LABELS[key]))
   f.moverLabel:Hide()
   f:EnableMouse(false)
 end
@@ -311,7 +316,8 @@ local function newPiece(slot)
 
   -- resultado del golpe (al lado o encima; se coloca en applyStyle)
   f.result = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  f.result:SetShadowOffset(1, -1)
+  -- su opacidad es la suya propia (resultAlpha), no la de la pieza
+  if f.result.SetIgnoreParentAlpha then pcall(f.result.SetIgnoreParentAlpha, f.result, true) end
   f.result:Hide()
 
   f:Hide()
@@ -371,12 +377,21 @@ local function applyStyle(f)
   else
     f.result:SetPoint("LEFT", f.text, "RIGHT", 6, 0)
   end
+  -- tamaño y contraste del texto de resultado
+  local font = GameFontNormal:GetFont()
+  f.result:SetFont(font, db.resultSize or 14, OUTLINE[db.resultOutline] or "")
+  if db.resultOutline == "shadow" or not OUTLINE[db.resultOutline] then
+    f.result:SetShadowOffset(1, -1)
+    f.result:SetShadowColor(0, 0, 0, 1)
+  else
+    f.result:SetShadowOffset(0, 0)
+  end
   f.cdStart, f.cdDur = nil, nil
 end
 
 local function setResult(f, kind)
   local r = RESULTS[kind]
-  f.result:SetText(r.t)
+  f.result:SetText(L(r.t))
   f.result:SetTextColor(r.c[1], r.c[2], r.c[3])
 end
 
@@ -385,8 +400,8 @@ local function showResult(slot, kind)
   if not f or not r or not f:IsShown() then return end
   if r.minor and not db.resultCrit then return end
   setResult(f, kind)
-  f.resultUntil = GetTime() + RESULT_HOLD + RESULT_FADE
-  f.result:SetAlpha(1)
+  f.resultUntil = GetTime() + (db.resultTime or 1.3)
+  f.result:SetAlpha(db.resultAlpha or 1)
   f.result:Show()
 end
 
@@ -590,7 +605,7 @@ end
 function ns.SetLocked(locked)
   ns.db.locked = locked
   if not locked then
-    print("|cff33ccffAttacking|r: arrastra cada pieza a su sitio. Clic derecho en cualquiera para fijarlas.")
+    print("|cff33ccffAttacking|r: " .. L("arrastra cada pieza a su sitio. Clic derecho en cualquiera para fijarlas."))
   end
   ns.Refresh()
   if ns.RefreshOptions then ns.RefreshOptions() end
@@ -646,6 +661,7 @@ end
 -- Cada fotograma (protegido: si falla, se avisa una vez y se para, sin soltar errores en bucle)
 ---------------------------------------------------------------------------
 local DEMO_OFFSET = { mh = 0, oh = 0.8, ranged = 1.6 }
+local FLASH_EARLY = 0.1 -- segundos antes de llenarse en que ya destella
 
 local function onUpdateImpl(_, dt)
   watchBlizzard(dt or 0)
@@ -669,7 +685,7 @@ local function onUpdateImpl(_, dt)
         f.result:Hide()
       elseif demo then
         setResult(f, DEMO_RESULT[slot])
-        f.result:SetAlpha(1)
+        f.result:SetAlpha(ns.db.resultAlpha or 1)
         f.result:Show()
       elseif f.resultUntil then
         local left = f.resultUntil - GetTime()
@@ -677,17 +693,20 @@ local function onUpdateImpl(_, dt)
           f.resultUntil = nil
           f.result:Hide()
         else
-          f.result:SetAlpha(math.min(1, left / RESULT_FADE))
+          f.result:SetAlpha(math.min(1, left / resultFade()) * (ns.db.resultAlpha or 1))
         end
       else
         f.result:Hide()
       end
       -- destello una vez por golpe, al llenarse (solo atacando: al dejar de atacar el icono
-      -- pasa a lleno de golpe y no tiene sentido destellar)
+      -- pasa a lleno de golpe y no tiene sentido destellar). Sale una pizca antes de llenarse
+      -- (FLASH_EARLY): si el golpe sale justo al estar listo, la barra del juego pasa de casi
+      -- llena a vacía sin llegar a leerse llena, y el destello no salía o salía tarde.
       local t = ns.T[slot]
       local active
       if slot == "ranged" then active = ns.shooting else active = ns.IsAttacking() end
-      if not demo and p >= 1 and not t.flashed then
+      local ready = p >= 1 or (p >= 0.5 and rem and rem > 0 and rem <= FLASH_EARLY)
+      if not demo and ready and not t.flashed then
         t.flashed = true
         if ns.db.flash and active then flash(f) end
       end
@@ -701,8 +720,7 @@ local function onUpdate(self, dt)
   local ok, err = pcall(onUpdateImpl, self, dt)
   if not ok then
     updateBroken = true
-    print("|cff33ccffAttacking|r: error al dibujar (" .. tostring(err)
-      .. "). Lo paro hasta que recargues. Pásale este mensaje a quien te hizo el addon.")
+    print("|cff33ccffAttacking|r: " .. L("error al dibujar (%s). Lo paro hasta que recargues. Pásale este mensaje a quien te hizo el addon.", tostring(err)))
   end
 end
 
