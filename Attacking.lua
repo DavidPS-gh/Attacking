@@ -168,15 +168,21 @@ end
 -- pasado «t» segundos y va por «p», le quedan t·(1−p)/p. Así nota los cambios de velocidad
 -- (Aluvión…). Al principio del golpe, con poco recorrido para medir, se usa la velocidad guardada.
 local MIN_MEASURE = 0.15
+local STALL = 0.5 -- mientras golpeas la barra no para de moverse; quieta más de esto = no golpeas
 function ns.Progress(slot)
+  -- Sin atacar (o sin disparar, para el disparo) el golpe está listo: lleno al momento
+  local active
+  if slot == "ranged" then active = ns.shooting else active = ns.attacking end
+  if not active then return 1, 0 end
+
   local p = blizProgress(slot)
   if p then
     if p >= 1 then return 1, 0 end
-    -- Barra parada más de lo que dura un golpe: no estás golpeando (objetivo fuera de alcance,
+    -- Atacando pero con la barra quieta: no estás golpeando (objetivo fuera de alcance,
     -- huyendo…), así que el golpe está listo y saldrá en cuanto vuelvas a tenerlo a tiro.
     -- (Forever deja su barra quieta al principio en ese caso y el icono se quedaba vacío.)
     local still = movedAt[slot] and (GetTime() - movedAt[slot]) or 0
-    if still > math.max(1, (speedOf(slot) or 2) * 1.2) then return 1, 0 end
+    if still > STALL then return 1, 0 end
     local t0 = resetAt[slot]
     if t0 and p >= MIN_MEASURE then
       local t = GetTime() - t0

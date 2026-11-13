@@ -43,7 +43,8 @@ local RESULTS = {
 }
 local DEMO_RESULT = { mh = "MISS", oh = "PARRY", ranged = "DODGE" } -- en la vista previa
 local RESULT_HOLD, RESULT_FADE = 0.8, 0.5
-local MATCH_WINDOW = 0.35 -- un resultado es tuyo si tu barra se reinició a menos de esto (s)
+local MATCH_WINDOW = 0.25 -- un resultado es tuyo si tu barra se reinició a menos de esto (s)
+local SOLO_WAIT = 0.1     -- yendo solo, lo que se espera como mucho a que llegue el reinicio
 
 -- Sitio de partida de cada pieza: { punto de la pieza, punto de la pantalla, x, y }.
 -- Iconos en fila; barras y puntos uno debajo de otro (son anchos).
@@ -389,34 +390,49 @@ local function showResult(slot, kind)
   f.result:Show()
 end
 
--- Lo que ha pasado a tu objetivo (Attacking.lua) se reparte entre las piezas: si coincide con
--- el reinicio de tu barra de golpe, es tuyo y de esa mano. Si no coincide con nada, solo se
--- enseña yendo solo (en grupo podría ser de otro), salvo que se pida también en grupo.
+-- La pieza cuyo golpe coincide con ese momento (su barra se reinició cerca), o nil
+local function matchSlot(t)
+  local slot, best
+  for _, s in ipairs(SLOTS) do
+    local r = ns.ResetAt(s)
+    if r and pieces[s]:IsShown() then
+      local d = math.abs(r - t)
+      if d <= MATCH_WINDOW and (not best or d < best) then slot, best = s, d end
+    end
+  end
+  return slot
+end
+
+-- Lo que ha pasado a tu objetivo (Attacking.lua) se reparte entre las piezas, lo antes posible:
+--   · si ya coincide con el reinicio de tu barra de golpe (lo normal: van a la vez), es tuyo y
+--     de esa mano, y sale al instante;
+--   · si aún no coincide, se espera un poco por si el reinicio llega justo después: yendo solo
+--     como mucho SOLO_WAIT y luego sale en la mano derecha (o el disparo); en grupo, hasta
+--     MATCH_WINDOW y luego se descarta (podría ser de otro), salvo que se pida en grupo.
 local function processResults(now)
   local q = ns.pendingResults
   if not q or #q == 0 then return end
   local db = ns.db
+  if not db.showResult or ns.IsDemo() then
+    for k in ipairs(q) do q[k] = nil end
+    return
+  end
+  local solo = db.resultGroup or not IsInGroup()
   local i = 1
   while q[i] do
     local item = q[i]
-    if now - item.t < MATCH_WINDOW then
-      i = i + 1 -- aún puede llegar el reinicio de la barra: se espera un poco
-    else
+    local age = now - item.t
+    local slot = matchSlot(item.t)
+    if slot then
       table.remove(q, i)
-      if db.showResult and not ns.IsDemo() then
-        local slot, best
-        for _, s in ipairs(SLOTS) do
-          local r = ns.ResetAt(s)
-          if r and pieces[s]:IsShown() then
-            local d = math.abs(r - item.t)
-            if d <= MATCH_WINDOW and (not best or d < best) then slot, best = s, d end
-          end
-        end
-        if not slot and (db.resultGroup or not IsInGroup()) then
-          slot = ns.shooting and "ranged" or "mh"
-        end
-        if slot then showResult(slot, item.kind) end
-      end
+      showResult(slot, item.kind)
+    elseif solo and age >= SOLO_WAIT then
+      table.remove(q, i)
+      showResult(ns.shooting and "ranged" or "mh", item.kind)
+    elseif age >= MATCH_WINDOW then
+      table.remove(q, i) -- en grupo y sin coincidir con un golpe tuyo: se descarta
+    else
+      i = i + 1
     end
   end
 end
@@ -666,11 +682,14 @@ local function onUpdateImpl(_, dt)
       else
         f.result:Hide()
       end
-      -- destello una vez por golpe, al llenarse
+      -- destello una vez por golpe, al llenarse (solo atacando: al dejar de atacar el icono
+      -- pasa a lleno de golpe y no tiene sentido destellar)
       local t = ns.T[slot]
+      local active
+      if slot == "ranged" then active = ns.shooting else active = ns.attacking end
       if not demo and p >= 1 and not t.flashed then
         t.flashed = true
-        if ns.db.flash then flash(f) end
+        if ns.db.flash and active then flash(f) end
       end
     end
   end

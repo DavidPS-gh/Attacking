@@ -2,7 +2,7 @@
 ## Title: Attacking
 ## Notes: Cuánto falta para tu siguiente golpe: icono, reloj, barra o puntos. /attacking
 ## Author: SenorLobo
-## Version: 0.8.0
+## Version: 0.8.1
 ## SavedVariables: AttackingDB
 
 Attacking.lua
