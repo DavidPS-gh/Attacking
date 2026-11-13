@@ -36,13 +36,12 @@ En Icono y Reloj se elige el dibujo: el arma que llevas equipada o una espada (y
 WoW Forever pone varias limitaciones a los addons (vistas probando en el juego):
 - **No se puede leer el registro de combate** (el juego lo bloquea con un aviso), así que Attacking no sabe por su cuenta cuándo golpeas. Lo que hace es **leer el avance de la barra de golpe del propio juego** (`SwingTimerMainHandFrame`, `SwingTimerRangedFrame` y, si existe, la de la mano izquierda). Por eso esa barra tiene que estar activada en los ajustes del juego.
 - La barra del juego va de 0 a 1 y en combate la velocidad de ataque es «secreta» para los addons. Los segundos se calculan **midiendo el ritmo de la propia barra** desde el último golpe, así que notan los cambios de velocidad (Aluvión…). Solo al principio de cada golpe se usa la velocidad leída fuera de combate.
-- **Sin atacar** (o sin disparar, para la pieza de disparo) el golpe está listo: la pieza se ve **llena** al momento.
-- Si estás atacando pero el objetivo se aleja o huye y no puedes golpearlo, la barra del juego se queda quieta. En cuanto lleva medio segundo parada, Attacking la muestra **llena**: el golpe está listo y saldrá en cuanto vuelvas a tenerlo a tiro.
+- **Manda la barra del juego**: mientras se mueve, la pieza se va cargando con sus segundos; si lleva medio segundo quieta (sin atacar, objetivo fuera de alcance o huyendo), la pieza se ve **llena**: el golpe está listo y saldrá en cuanto lo tengas a tiro. Así no depende de que el juego avise de que empiezas a atacar (ese aviso se pierde, por ejemplo, si ya atacabas al hacer `/reload`).
 - Los textos de resultado salen al instante si coinciden con tu golpe; si no, como mucho 0,1 s después yendo solo.
 - La barra de disparo del juego está visible aunque no dispares: la pieza de disparo solo sale cuando el juego avisa de que empiezas a disparar.
 - Por las mismas limitaciones se quitó el seguimiento de buffos y debuffos (en combate no se pueden leer).
 - El resultado del golpe sale de `UNIT_COMBAT`, que Forever sí permite (lo que le pasa a tu objetivo).
-- `/attacking debug` escribe 5 segundos en el chat lo que se lee de las barras del juego (para diagnosticar).
+- `/attacking debug` escribe 5 segundos en el chat lo que se lee de las barras del juego y si el addon cree que atacas (para diagnosticar).
 
 ## Datos guardados
 - `AttackingDB` (toda la cuenta): estilo, posiciones, tamaño y opciones.

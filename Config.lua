@@ -369,6 +369,8 @@ SlashCmdList.ATTACKING = function(msg)
     local ticker
     ticker = C_Timer.NewTicker(0.25, function()
       n = n + 1
+      print(("%s%d atacando: aviso=%s total=%s | disparando=%s | en combate=%s"):format(
+        P, n, tostring(ns.attacking), tostring(ns.IsAttacking()), tostring(ns.shooting), tostring(ns.inCombat)))
       for _, slot in ipairs({ "mh", "oh", "ranged" }) do
         local f = ns.BlizFrame(slot)
         if f then
@@ -378,10 +380,10 @@ SlashCmdList.ATTACKING = function(msg)
             return a, b, bar:GetValue()
           end)
           local p, rem = ns.Progress(slot)
-          print(("%s%d %s visible=%s | min=%s max=%s valor=%s | carga=%.2f quedan=%.2f"):format(
+          print(("%s%d %s visible=%s | min=%s max=%s valor=%s | carga=%.2f quedan=%.2f quieta=%.1fs"):format(
             P, n, slot, tostring(f:IsShown()),
             ok and tostring(lo) or "ERR", ok and tostring(hi) or "ERR", ok and tostring(v) or tostring(lo),
-            p or -1, rem or -1))
+            p or -1, rem or -1, ns.StillFor(slot)))
         end
       end
       if n >= 20 then ticker:Cancel() end

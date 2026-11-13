@@ -527,7 +527,7 @@ end
 -- y para el disparo solo vale el aviso del juego de que empiezas a disparar.
 local function wantedByMode()
   local db, mode = ns.db, ns.db.iconWhen
-  local attacking = ns.attacking or (ns.inCombat and ns.BlizShown("mh"))
+  local attacking = ns.IsAttacking() or (ns.inCombat and ns.BlizShown("mh"))
   local shooting = ns.shooting
   local melee, ranged
   if mode == "always" then
@@ -686,7 +686,7 @@ local function onUpdateImpl(_, dt)
       -- pasa a lleno de golpe y no tiene sentido destellar)
       local t = ns.T[slot]
       local active
-      if slot == "ranged" then active = ns.shooting else active = ns.attacking end
+      if slot == "ranged" then active = ns.shooting else active = ns.IsAttacking() end
       if not demo and p >= 1 and not t.flashed then
         t.flashed = true
         if ns.db.flash and active then flash(f) end

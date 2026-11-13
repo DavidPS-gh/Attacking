@@ -106,7 +106,19 @@ local dir = { mh = 1, oh = 1, ranged = 1 } -- 1 = la barra se llena, -1 = se vac
 local last = {}
 local resetAt = {} -- momento en que la barra empezó el golpe actual (para medir su ritmo)
 local movedAt = {} -- última vez que la barra se movió (para saber si se ha quedado parada)
+local movedFrom = {} -- valor de la barra la última vez que se vio moverse
 local warnedSecret
+
+-- ¿Tienes puesto el ataque automático? El aviso del juego (PLAYER_ENTER_COMBAT) puede perderse
+-- (p. ej. si ya atacabas al hacer /reload), así que también se pregunta por el hechizo «Atacar».
+local AUTO_ATTACK = 6603
+function ns.IsAttacking()
+  if ns.attacking then return true end
+  local fn = (C_Spell and C_Spell.IsCurrentSpell) or IsCurrentSpell
+  if not fn then return false end
+  local ok, cur = pcall(function() return fn(AUTO_ATTACK) == true end) -- (por si fuera «secreto»)
+  return ok and cur
+end
 
 function ns.BlizFrame(slot)
   return _G[BLIZ[slot]]
@@ -115,6 +127,11 @@ end
 -- Cuándo empezó el golpe actual de esa mano (la barra del juego se reinicia en cada golpe tuyo)
 function ns.ResetAt(slot)
   return resetAt[slot]
+end
+
+-- Segundos que lleva quieta la barra del juego de ese golpe (para /attacking debug)
+function ns.StillFor(slot)
+  return movedAt[slot] and (GetTime() - movedAt[slot]) or -1
 end
 
 -- ¿La barra de Blizzard de ese golpe está visible?
@@ -133,7 +150,13 @@ local function readBar(slot, bar)
   -- En cada golpe la barra salta: si salta hacia abajo es que se llena; si salta hacia
   -- arriba, que se vacía. Así se sabe hacia dónde va sin depender de cómo esté hecha.
   local prev = last[slot]
-  if not prev or math.abs(p - prev) > 0.0005 then movedAt[slot] = GetTime() end
+  -- Se compara con el valor de la última vez que se movió (no con el fotograma anterior): así
+  -- cuenta aunque avance a pasitos muy pequeños por fotograma o se actualice a saltos.
+  local from = movedFrom[slot]
+  if not from or math.abs(p - from) > 0.002 then
+    if from then movedAt[slot] = GetTime() end
+    movedFrom[slot] = p
+  end
   if prev and math.abs(p - prev) > 0.5 then
     dir[slot] = (p < prev) and 1 or -1
     T[slot].flashed = false -- nuevo golpe: el destello vuelve a estar disponible
@@ -170,18 +193,14 @@ end
 local MIN_MEASURE = 0.15
 local STALL = 0.5 -- mientras golpeas la barra no para de moverse; quieta más de esto = no golpeas
 function ns.Progress(slot)
-  -- Sin atacar (o sin disparar, para el disparo) el golpe está listo: lleno al momento
-  local active
-  if slot == "ranged" then active = ns.shooting else active = ns.attacking end
-  if not active then return 1, 0 end
-
   local p = blizProgress(slot)
   if p then
     if p >= 1 then return 1, 0 end
-    -- Atacando pero con la barra quieta: no estás golpeando (objetivo fuera de alcance,
-    -- huyendo…), así que el golpe está listo y saldrá en cuanto vuelvas a tenerlo a tiro.
-    -- (Forever deja su barra quieta al principio en ese caso y el icono se quedaba vacío.)
-    local still = movedAt[slot] and (GetTime() - movedAt[slot]) or 0
+    -- Manda la propia barra del juego: si se está moviendo, el golpe está cargando (aunque el
+    -- addon no se haya enterado de que atacas, p. ej. tras un /reload). Si lleva quieta más de
+    -- STALL, no estás golpeando (sin atacar, objetivo fuera de alcance, huyendo…): el golpe
+    -- está listo y la pieza se ve llena.
+    local still = movedAt[slot] and (GetTime() - movedAt[slot]) or math.huge
     if still > STALL then return 1, 0 end
     local t0 = resetAt[slot]
     if t0 and p >= MIN_MEASURE then
@@ -191,6 +210,9 @@ function ns.Progress(slot)
     return p, (1 - p) * (speedOf(slot) or 0)
   end
   -- sin barra del juego (solo el disparo puede contarse por su cuenta)
+  local active
+  if slot == "ranged" then active = ns.shooting else active = ns.IsAttacking() end
+  if not active then return 1, 0 end
   local t = T[slot]
   if not t.start then return 1, 0 end
   local e = GetTime() - t.start
